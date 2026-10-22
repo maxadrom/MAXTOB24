@@ -1,0 +1,41 @@
+# Node dependencies
+node_modules
+.pnpm-store
+
+# Logs
+*.log
+
+# Misc
+.DS_Store
+.fleet
+.idea
+.vscode/
+*.swp
+/@tmp
+
+# Secrets
+.env
+.env.*
+!.env.example
+!.env.prod.example
+.mcp.json
+
+# Deploy / backups
+# Дампы Postgres (make prod-db-backup / db-backup) — не коммитим.
+backup_*.sql
+# Локальные координаты VPS (паттерн .env.* их НЕ покрывает — имя не на .env.).
+scripts/deploy.env
+!scripts/deploy.env.example
+
+# Editor/merge backups
+*.orig
+
+# Локальный compose-override (порты, монтирования своей машины) и отчёты security-скриптов
+docker-compose.override.yml
+reports/
+
+# Локальный AI-контекст и заметки разработчика — вне репо
+.ai-factory/
+.ai-factory.json
+.claude/
+.cursor/

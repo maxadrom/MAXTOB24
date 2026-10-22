@@ -1,0 +1,59 @@
+# Prod-override поверх базового docker-compose.yml.
+# Применять ТОЛЬКО так (оба файла):
+#   docker compose -f docker-compose.yml -f docker-compose.server.yml \
+#     --profile node --profile db-postgres <команда>
+# Штатно — `make deploy` с локали или `make prod-up` на VPS: миграции идут one-off
+# контейнером (`run --rm`) до пересоздания api, а не `up -d --build` (M26).
+# Не трогает соседние стеки на VPS и общий reverse-proxy —
+# роутинг по путям делает Caddy site-блок вашего домена, а не этот файл.
+#
+# СЕМАНТИКА YAML-тегов слияния (Compose v2.24+, проверено live на VPS 2026-05-29):
+#   - без тега           → списки КОНКАТЕНИРУЮТСЯ с базовыми (нам не подходит для ports/volumes);
+#   - !override <список> → ЗАМЕНЯЕТ список (значение сохраняется) — для loopback-публикации портов;
+#   - !reset []          → УДАЛЯЕТ ключ целиком (пустой список) — чтобы НЕ публиковать порт наружу.
+# Внимание: !reset с НЕпустым значением тоже дропнет ключ — значение потеряется.
+
+services:
+  api-node:
+    restart: unless-stopped
+    # M29: по SIGTERM процесс дренирует очередь исходящих с открытым портом, до
+    # SHUTDOWN_DRAIN_TIMEOUT_MS (170 с) + ≤ 5 с на закрытие порта и пула (жёсткий таймер
+    # процесса — 175 с). Держать больше SHUTDOWN_DRAIN_TIMEOUT_MS не меньше чем на 10 с:
+    # иначе SIGKILL Docker опередит или догонит жёсткий таймер (выход 137 без pool.end и
+    # без «shutdown complete»).
+    # Значение пишется в контейнер при создании (StopTimeout): первое пересоздание после
+    # добавления останавливает старый контейнер по его прежним 10 с. Действует на docker
+    # stop/restart, compose up (пересоздание), down. В базовом docker-compose.yml его нет:
+    # dev — nodemon.
+    stop_grace_period: 180s
+    # M30: логи — в системный journald, а не json-file по умолчанию: тот удаляется вместе с
+    # контейнером на каждом деплое, и неудачи (message_log пишет только успех) видны лишь с
+    # последнего пересоздания. Журнал переживает recreate, туда же идут one-off миграции
+    # (`compose run`). `docker logs api` / `make prod-logs` — как раньше (текущий контейнер);
+    # история — `make prod-journal` (sudo journalctl -t maxtob24-api). Объём ~170 строк/ч, лимит
+    # journald по умолчанию — 10 % ФС, не больше 4 ГБ.
+    logging:
+      driver: journald
+      options:
+        tag: maxtob24-api
+    # Security M13: жёстко фиксируем прод-стадию. Базовый compose имеет
+    # target: ${BUILD_TARGET:-dev} (дефолт dev!) — без этого override прод собирал бы
+    # dev-стадию (nodemon + ВСЕ devDeps, включая уязвимый dev-тулинг). Здесь target
+    # перекрывает base независимо от BUILD_TARGET в прод-.env.
+    build:
+      target: production
+    # loopback-only: Caddy reverse_proxy 127.0.0.1:5182 → api. !override ЗАМЕНЯЕТ базовый 8000:8000.
+    ports: !override
+      - "127.0.0.1:5182:8000"
+    # Снимаем dev source-bind ./backends/node/api:/app (затёр бы собранный prod-образ без node_modules).
+    # Логи — stdout → journald (logging выше), томов у api нет.
+    volumes: !reset []
+    environment:
+      NODE_ENV: production
+      PORT: 8000
+
+  database-postgres:
+    restart: unless-stopped
+    # НЕ публикуем 5432 на боевой IP — доступ к БД только из internal-net. !reset [] корректен:
+    # нужен именно пустой список (полное снятие host-публикации). Том postgres_data сохраняется (base).
+    ports: !reset []

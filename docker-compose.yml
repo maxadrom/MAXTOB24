@@ -1,0 +1,56 @@
+services:
+  # (~) Database
+  database-postgres:
+    profiles: ["db-postgres"]
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-appdb}
+      POSTGRES_USER: ${DB_USER:-appuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-apppass}
+    # Только loopback: на сервере БД и API не должны торчать наружу (снаружи — через reverse-proxy с TLS).
+    ports:
+      - "127.0.0.1:${DB_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-appuser} -d ${DB_NAME:-appdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      internal-net:
+        aliases:
+          - database
+
+  # (~) API server (Node.js)
+  api-node:
+    profiles: ["node"]
+    container_name: api
+    build:
+      context: ./backends/node/api
+      dockerfile: Dockerfile
+      target: ${BUILD_TARGET:-dev}
+    env_file: .env
+    environment:
+      DB_HOST: database
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 8000
+    expose:
+      - "8000"
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./backends/node/api:/app
+    depends_on:
+      database-postgres:
+        condition: service_healthy
+        required: false
+    networks:
+      - internal-net
+
+networks:
+  internal-net:
+    driver: bridge
+
+volumes:
+  postgres_data:

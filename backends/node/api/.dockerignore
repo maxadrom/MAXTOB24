@@ -1,0 +1,11 @@
+node_modules
+.pnpm-store
+.git
+logs
+# Security M13: защитно при `COPY . ./` в прод-стадии — не тащить секреты,
+# тесты и документацию в образ.
+.env
+.env.*
+*.example
+tests
+*.md
